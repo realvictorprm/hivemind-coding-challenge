@@ -16,7 +16,8 @@ spec:
     spec:
       containers:
       - name: elasticsearch
-        image: docker.io/library/elasticsearch:7.17.10
+        image: docker.io/library/elasticsearch:8.7.0
+        imagePullPolicy: "Always"
         ports:
         - containerPort: 9200
           name: foo
