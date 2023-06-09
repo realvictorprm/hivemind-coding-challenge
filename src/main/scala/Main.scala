@@ -1,5 +1,9 @@
 import com.sksamuel.elastic4s.http.JavaClient
-import com.sksamuel.elastic4s.{ElasticClient, ElasticProperties, RequestSuccess}
+import com.sksamuel.elastic4s.{
+  ElasticClient,
+  ElasticProperties,
+  RequestSuccess
+}
 import zio.*
 import zio.http.*
 import zio.*
@@ -20,22 +24,53 @@ import com.sksamuel.elastic4s.requests.searches.aggs.*
 import com.sksamuel.elastic4s.requests.searches.aggs.responses.bucket.Terms
 import com.sksamuel.elastic4s.requests.searches.queries.*
 
+import scala.util.Try
+
 // {
 //  "start": "01.01.2010",
 //  "end": "31.12.2020",
 //  "limit": 2,
 //  "min_number_reviews": 2
 // }
+
+import zio.prelude.Newtype
+
+object InputPayloadDateTime extends Newtype[LocalDate] {
+  import java.time.format.DateTimeFormatter
+
+//  implicit val encoder: JsonEncoder[InputPayloadDateTime] =
+//    JsonEncoder.string.contramap { (it: InputPayloadDateTime) =>
+//      unwrap(it).format("YYYY-MM-DD")
+//    }
+  implicit val decoder: JsonDecoder[InputPayloadDateTime] = {
+    val formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
+    JsonDecoder.string.mapOrFail((it: String) =>
+      Try(LocalDate.parse(it, formatter)).fold(
+        err => Left(err.getMessage),
+        date => Right(InputPayloadDateTime.wrap(date))
+      )
+    )
+  }
+
+  def toUnixTimestamp(date: InputPayloadDateTime): Long =
+    InputPayloadDateTime
+      .unwrap(date)
+      .atStartOfDay(ZoneOffset.UTC)
+      .toEpochSecond
+}
+
+type InputPayloadDateTime = InputPayloadDateTime.Type
+
 case class InputPayload(
-    start: LocalDate,
-    end: LocalDate,
+    start: InputPayloadDateTime,
+    end: InputPayloadDateTime,
     limit: Int,
     min_number_reviews: Int
 )
 
 object InputPayload {
-  implicit val encoder: JsonEncoder[InputPayload] =
-    DeriveJsonEncoder.gen[InputPayload]
+//  implicit val encoder: JsonEncoder[InputPayload] =
+//    DeriveJsonEncoder.gen[InputPayload]
   implicit val decoder: JsonDecoder[InputPayload] =
     DeriveJsonDecoder.gen[InputPayload]
 }
@@ -67,14 +102,13 @@ object Review {
 object HelloWorld extends ZIOAppDefault {
 
   import concurrent.ExecutionContext.Implicits.global
-  import OutputPayload._
 
   val indexName = "index"
 
-  def responseError(msg: String) =
-    Response.json(msg).withStatus(Status.InternalServerError)
+  def responseError(msg: String): Response =
+    Response.text(msg).withStatus(Status.InternalServerError)
 
-  def app(client: ElasticClient): App[Any] =
+  def app(client: ElasticClient) =
     Http
       .collectZIO[Request] {
         case req @ Method.POST -> Root / "amazon" / "best-rated" =>
@@ -85,19 +119,15 @@ object HelloWorld extends ZIOAppDefault {
             )
             payload <- ZIO
               .fromEither(body.fromJson[InputPayload])
-              .mapError(it => responseError(it))
+              .mapError(responseError)
             // Use the payload to construct the search-aggregation request
             req = search(indexName)
               // Select only those values which are within the requested timeframe.
               // Yes the way time is handled here could possibly be nicer.
               .query(
                 RangeQuery("unixReviewTime")
-                  .lte(
-                    payload.end.toEpochSecond(LocalTime.NOON, ZoneOffset.MIN)
-                  )
-                  .gte(
-                    payload.start.toEpochSecond(LocalTime.NOON, ZoneOffset.MIN)
-                  )
+                  .gte(InputPayloadDateTime.toUnixTimestamp(payload.start))
+                  .lte(InputPayloadDateTime.toUnixTimestamp(payload.end))
               )
               .aggs(
                 // We want to group by asin and avg the overall field while ordering descending
@@ -127,21 +157,19 @@ object HelloWorld extends ZIOAppDefault {
               .mapError { it => responseError(it.getMessage) }
           } yield res
       }
-      .mapError { error =>
-        println(error.toString)
-        error
-      }
 
   override val run =
     for {
       // Begin with reading in the command line argument that provides the path to the sample data
       args <- this.getArgs
-      ingestFileUrl = args.headOption.getOrElse("./amazon-reviews.json")
+      ingestFileUrl = args.headOption.getOrElse("./sample-data.json")
       _ = println(ingestFileUrl)
       // Init the elastic client
       client <- ZIO.fromAutoCloseable(
         ZIO.from(
-          ElasticClient(JavaClient(ElasticProperties("http://localhost:9200")))
+          ElasticClient(
+            JavaClient(ElasticProperties("http://localhost:9200"))
+          )
         )
       )
       // We need a fresh index with asin being a keyword field for group-by operations
@@ -150,7 +178,9 @@ object HelloWorld extends ZIOAppDefault {
         createIndex(indexName).mapping(properties(keywordField("asin")))
       )
       // Read in the sample data and ingest it into the elasticsearch index as a bulk
-      source <- ZIO.fromAutoCloseable(ZIO.from(Source.fromFile(ingestFileUrl)))
+      source <- ZIO.fromAutoCloseable(
+        ZIO.from(Source.fromFile(ingestFileUrl))
+      )
       // Side Note: The chunk size is something that needs to be tested invidually for the machine.
       // It definitely is necessary as the ingestion process is otherwise either way too slow or without any chunking
       // we will crash at some point as we run out of memory.

@@ -5,9 +5,7 @@ lazy val root = project
   .settings(
     name := "hivemind-coding-challenge",
     version := "0.1.0-SNAPSHOT",
-
     scalaVersion := scala3Version,
-
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % "0.7.29" % Test,
       "dev.zio" %% "zio" % "2.0.15",
@@ -17,6 +15,12 @@ lazy val root = project
       "com.github.pureconfig" %% "pureconfig" % "0.17.4" cross CrossVersion.for3Use2_13,
       "com.sksamuel.elastic4s" % "elastic4s-core_3" % elastic4sVersion,
       "com.sksamuel.elastic4s" %% "elastic4s-client-esjava" % elastic4sVersion,
-      "com.sksamuel.elastic4s" %% "elastic4s-effect-zio" % elastic4sVersion,
+      "com.sksamuel.elastic4s" %% "elastic4s-effect-zio" % elastic4sVersion
     )
   )
+
+Docker / packageName := "hivemind-coding-challenge"
+Docker / version := "0.0.1"
+dockerBaseImage := "eclipse-temurin:11.0.19_7-jre-jammy"
+dockerUpdateLatest := true
+dockerExecCommand := Seq("podman")
