@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webserver-deployment
+  labels:
+    app: webserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webserver
+  template:
+    metadata:
+      labels:
+        app: webserver
+    spec:
+      containers:
+        - name: webserver
+          image: hivemind-coding-challenge:0.0.1
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: INPUT_FILE_URL
+              value: /test-data/sample-data.json
+          volumeMounts:
+            - name: test-data
+              mountPath: /test-data
+      volumes:
+        - name: test-data
+          hostPath:
+            path: /test-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webserver
+spec:
+  selector:
+    app: webserver
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080

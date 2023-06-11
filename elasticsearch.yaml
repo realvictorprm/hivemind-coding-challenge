@@ -15,19 +15,19 @@ spec:
         app: elasticsearch
     spec:
       containers:
-      - name: elasticsearch
-        image: docker.io/library/elasticsearch:8.7.0
-        imagePullPolicy: "Always"
-        ports:
-        - containerPort: 9200
-          name: foo
-        - containerPort: 9300
-          name: bar
-        env: 
-          - name: discovery.type
-            value: single-node
-          - name: xpack.security.enabled
-            value: "false"
+        - name: elasticsearch
+          image: docker.io/library/elasticsearch:8.7.0
+          imagePullPolicy: "Always"
+          ports:
+            - containerPort: 9200
+              name: foo
+            - containerPort: 9300
+              name: bar
+          env:
+            - name: discovery.type
+              value: single-node
+            - name: xpack.security.enabled
+              value: "false"
 ---
 apiVersion: v1
 kind: Service
