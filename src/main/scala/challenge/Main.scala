@@ -1,113 +1,35 @@
-import com.sksamuel.elastic4s.http.{JavaClient, JavaClientExceptionWrapper}
+package challenge
+
+import zio._
+import zio.http._
+import zio.json._
+import zio.stream.ZStream
+import challenge.model.{
+  InputPayload,
+  InputPayloadDateTime,
+  OutputPayload,
+  Review,
+  WebserverConf
+}
 import com.sksamuel.elastic4s.{
   ElasticClient,
   ElasticProperties,
   RequestFailure,
-  RequestSuccess,
-  Response
+  RequestSuccess
 }
-import zio.*
-import zio.http.*
-import zio.stream.ZStream
-import zio.json.*
-
-import java.time.{LocalDate, ZoneOffset}
-import scala.io.Source
-import scala.language.postfixOps
-import com.sksamuel.elastic4s.ElasticDsl.*
-import com.sksamuel.elastic4s.requests.indexes.IndexRequest
-import com.sksamuel.elastic4s.requests.searches.aggs.*
-import com.sksamuel.elastic4s.zio.instances.*
+import com.sksamuel.elastic4s.ElasticDsl._
+import com.sksamuel.elastic4s.http.{JavaClient, JavaClientExceptionWrapper}
+import com.sksamuel.elastic4s.requests.searches.aggs._
 import com.sksamuel.elastic4s.requests.searches.aggs.responses.bucket.Terms
-import com.sksamuel.elastic4s.requests.searches.queries.*
-
-import scala.util.Try
-import zio.prelude.Newtype
-
-// To conform with the input payload unusual date time format,
-// we use a newtype wrapping the localdate type
-// and create a custom decoder for it.
-// As there is no need for encoding I did not write an encoder.
-object InputPayloadDateTime extends Newtype[LocalDate] {
-  import java.time.format.DateTimeFormatter
-  import java.time.format.DateTimeParseException
-
-  // The magic of DateTimeFormatter, yay!
-  implicit val decoder: JsonDecoder[InputPayloadDateTime] = {
-    val formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
-    JsonDecoder.string.mapOrFail((it: String) =>
-      Try(LocalDate.parse(it, formatter)).fold(
-        err => {
-          val errMsg = err match {
-            case _: DateTimeParseException =>
-              s"Failed parsing time field, did you make sure to use the format dd.MM.yyyy?"
-            case _ =>
-              s"Unknown failure while parsing date time field. ${err.toString}"
-          }
-          Left(errMsg)
-        },
-        date => Right(InputPayloadDateTime.wrap(date))
-      )
-    )
-  }
-
-  // The data in ElasticSearch is using UnixTimestamps thus
-  // we need a function to convert the payload date time into a timestamp
-  def toUnixTimestamp(date: InputPayloadDateTime): Long =
-    InputPayloadDateTime
-      .unwrap(date)
-      .atStartOfDay(ZoneOffset.UTC)
-      .toEpochSecond
-}
-
-// To complete the newtype declaration
-type InputPayloadDateTime = InputPayloadDateTime.Type
-
-// The min_number_reviews field name does not conform with standard styling.
-// However adding an extra type for converting between payload type and inner used type
-// seemed a bit excessive to me.
-case class InputPayload(
-    start: InputPayloadDateTime,
-    end: InputPayloadDateTime,
-    limit: Int,
-    min_number_reviews: Int
-)
-
-object InputPayload {
-  implicit val decoder: JsonDecoder[InputPayload] =
-    DeriveJsonDecoder.gen[InputPayload]
-}
-
-case class OutputPayload(asin: String, average_rating: Double)
-
-object OutputPayload {
-  implicit val encoder: JsonEncoder[OutputPayload] =
-    DeriveJsonEncoder.gen[OutputPayload]
-}
-
-case class Review(
-    asin: String,
-    helpful: List[Int],
-    overall: Double,
-    reviewText: String,
-    reviewerID: String,
-    reviewerName: String,
-    summary: String,
-    unixReviewTime: Long
-)
-
-object Review {
-  implicit val encoder: JsonEncoder[Review] = DeriveJsonEncoder.gen[Review]
-  implicit val decoder: JsonDecoder[Review] = DeriveJsonDecoder.gen[Review]
-}
+import com.sksamuel.elastic4s.requests.searches.queries._
+import com.sksamuel.elastic4s.zio.instances._
+import scala.io.Source
 
 object HelloWorld extends ZIOAppDefault {
 
   import org.slf4j.LoggerFactory
 
   val logger = LoggerFactory.getLogger(getClass)
-
-  import concurrent.ExecutionContext.Implicits.global
 
   val indexName = "index"
 
@@ -136,11 +58,14 @@ object HelloWorld extends ZIOAppDefault {
         case req @ Method.POST -> Root / "amazon" / "best-rated" =>
           for {
             // We need to extract the information from the body first
-            body <- req.body.asString.mapError(it =>
-              respondeWithInternalServerError(
-                "Failure extracting body: " + it.getMessage
+            body <- {
+              println("Incoming request")
+              req.body.asString.mapError(it =>
+                respondeWithInternalServerError(
+                  "Failure extracting body: " + it.getMessage
+                )
               )
-            )
+            }
             payload <- ZIO
               .fromEither(body.fromJson[InputPayload])
               .mapError(error =>
@@ -206,11 +131,15 @@ object HelloWorld extends ZIOAppDefault {
       }
 
   override val run = {
+    import pureconfig._
+    import pureconfig.generic.auto._
     val prog =
       for {
         // Begin with reading in the command line argument that provides the path to the sample data
-        args <- this.getArgs
-        ingestFileUrl = args.headOption.getOrElse("./sample-data.json")
+        config <- ZIO
+          .from(ConfigSource.default.load[WebserverConf])
+          .mapError(it => new Exception(it.toString()))
+        ingestFileUrl = config.ingestFileUrl
         _ = logger.info(
           s"Input file: $ingestFileUrl"
         )
@@ -247,14 +176,15 @@ object HelloWorld extends ZIOAppDefault {
                     indexInto(indexName)
                       .source(payload.toJson)
                   )
-                  .mapError(it =>
-                    new Exception(s"Failed parsing payload: $it")
-                  )
+                  .mapError(it => new Exception(s"Failed parsing payload: $it"))
               }
               .collectZIO(identity(_))
               .flatMap { requests =>
-                val it = requests.toArray
-                client.execute(bulk(it: _*))
+                val res =
+                  client.execute(
+                    bulk(requests.toArray: _*)
+                  )
+                res
               }
           }
 

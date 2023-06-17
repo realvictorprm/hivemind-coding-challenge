@@ -21,7 +21,7 @@ spec:
             - containerPort: 8080
               name: http
           env:
-            - name: INPUT_FILE_URL
+            - name: INGEST_FILE_URL
               value: /test-data/sample-data.json
           volumeMounts:
             - name: test-data
