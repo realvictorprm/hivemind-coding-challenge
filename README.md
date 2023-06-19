@@ -1,14 +1,14 @@
 # Hivemind Coding Challenge example solution
 
-This solution uses the following technologies to solve the coding challenge from (Hivemind)[]:
+This solution uses the following technologies to solve the coding challenge from [Hivemind](https://github.com/HivemindTechnologies/scala-coding-challenge):
 
-- Scala 3 because "Why not?(TM)"
+- Scala 2.13
 - Zio Core, Zio Streaming, Zio .. to handle the application logic in a nice FP way
 - ElasticSearch for the data management and querying (including an elastic4s to handle it in Scala)
 - Kubernetes to mimic more realism
 - docker combined with minikube for local testing on a k8s cluster
 
-## How to start the webserver?
+## How to run the integration tests?
 
 Before please make sure that you have installed:
 
@@ -18,20 +18,17 @@ Before please make sure that you have installed:
 - sbt
 - python 3.10
 
-If you meet all those requirements then do in the
-
-#### first console with admin rights:
+If you meet all those requirements then in a console do:
 
 1. start a kubernetes cluster via `minikube start`
-2. mount the folder with the test-data via `minikube mount ./test-data:/test-data`
+1. run `py pre-it-test.py` and give the elasticsearch a couple minutes to start properly
+1. run `py it-test.py`
 
-#### second console without admin rights:
 
-1. run.sh / run.bat
-2. run `py portforward.py`
+The `it-test.py` script will not stop even in case of error till you exit it manually. That gives you the opportunity to make use of the portforwarding to make calls on `localhost:8080`.
 
-After those steps the minikube cluster is started, the elasticsearch and the webserver are deployed to the cluster and
-the webserver is reachable on `localhost:8080` thanks to portforwarding.
+Besides that you can adjust the data given to the webserver by editing or replacing the file in `./test-data/sampleData.json`
 
-Now you can make requests to the webserver via e.g. Postman using this url: `localhost:8080/amazon/best-reviews`
+You can also just provide a different file in the folder `test-data` and edit the env var `INGEST_FILE_URL` in the `webserver.yaml` file.
 
+In any case, if you want to change the data you have to restart the webserver and that is best done via calling `py restart-webserver.py`.
